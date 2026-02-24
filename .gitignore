@@ -1,1 +1,31 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+venv/
+.env
+
+# Model Checkpoints
+luna_lm_checkpoints_*/
+*.pt
+
+# Large Datasets and Logs
 *.txt
+*.jsonl
+vocab_analysis_results.txt
+
+# Keep specific small files if necessary (e.g., sample datasets)
+!README.md
+!LICENSE
+!QUICKSTART.md
+!TRAINING_GUIDE.md
+!TURKISH_TOKENIZER_README.md
+!PARAMETER_RECOMMENDATIONS.md
+
+# IDEs
+.vscode/
+.qodo/
+.idea/
+.DS_Store
