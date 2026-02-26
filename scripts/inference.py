@@ -3,65 +3,21 @@ Luna-LM Model Inference
 Eğitilmiş modeli yükleyip metin üretimi yapar
 """
 
-import torch
-import json
+import sys
 import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+import torch
 import glob
 
-from turkish_tokenizer_pretrained import PretrainedTurkishTokenizer
-from model import GPTModel, generate_text
+from luna.utils import load_model
+from luna.generate import generate_text
 
 
 # ==================== INFERENCE FONKSİYONLARI ====================
 
-def load_model(checkpoint_dir, checkpoint_name="best_model.pt", device="cpu"):
-    """Eğitilmiş modeli yükle"""
-    
-    print(f"Model yükleniyor: {checkpoint_dir}")
-    
-    # Config yükle
-    config_path = os.path.join(checkpoint_dir, "config.json")
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config bulunamadı: {config_path}")
-    
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    
-    model_config = config['model_config']
-    tokenizer_name = config.get('tokenizer', 'dbmdz/bert-base-turkish-cased')
-    
-    print(f"  Config yüklendi:")
-    print(f"    Vocab size: {model_config['vocab_size']:,}")
-    print(f"    Layers: {model_config['n_layers']}")
-    print(f"    Embedding dim: {model_config['emb_dim']}")
-    
-    # Model oluştur
-    model = GPTModel(model_config)
-    
-    # Checkpoint yükle
-    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint bulunamadı: {checkpoint_path}")
-    
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    model.eval()
-    
-    print(f"  ✓ Model yüklendi: {checkpoint_name}")
-    print(f"    Epoch: {checkpoint.get('epoch', 'N/A')}")
-    print(f"    Global step: {checkpoint.get('global_step', 'N/A'):,}")
-    print(f"    Val loss: {checkpoint.get('val_loss', 'N/A'):.4f}")
-    
-    # Tokenizer yükle
-    print(f"\n  Tokenizer yükleniyor: {tokenizer_name}")
-    tokenizer = PretrainedTurkishTokenizer(tokenizer_name)
-    
-    return model, tokenizer, model_config
-
-
 def interactive_mode(model, tokenizer, device, model_config):
-    """İnteraktif mod - kullanıcıdan prompt al ve üret"""
+    """İnteraktif mod — kullanıcıdan prompt al ve üret"""
     
     print("\n" + "="*60)
     print("LUNA-LM İNTERAKTİF MOD")
@@ -133,12 +89,17 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}\n")
     
-    # Checkpoint dizini bul
-    checkpoint_dirs = glob.glob("luna_lm_checkpoints_*")
+    # Proje kök dizini
+    project_root = os.path.join(os.path.dirname(__file__), '..')
+    
+    # Checkpoint dizini bul (önce yeni yapı, sonra eski yapı)
+    checkpoint_dirs = glob.glob(os.path.join(project_root, "checkpoints", "pretrain_*"))
+    if not checkpoint_dirs:
+        checkpoint_dirs = glob.glob(os.path.join(project_root, "luna_lm_checkpoints_*"))
     
     if not checkpoint_dirs:
         print("❌ Hiç checkpoint bulunamadı!")
-        print("   Önce train_luna_lm.py ile model eğitin.")
+        print("   Önce scripts/train.py ile model eğitin.")
         return
     
     # En son checkpoint'i seç

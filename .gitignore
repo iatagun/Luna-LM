@@ -8,24 +8,30 @@ venv/
 .env
 
 # Model Checkpoints
+checkpoints/
 luna_lm_checkpoints_*/
 *.pt
 
 # Large Datasets and Logs
 *.txt
 *.jsonl
-vocab_analysis_results.txt
+sft/sft_dataset.jsonl
 
-# Keep specific small files if necessary (e.g., sample datasets)
+# LLMs-from-scratch (referans)
+LLMs-from-scratch/
+
+# Keep specific small files
 !README.md
 !LICENSE
 !QUICKSTART.md
 !TRAINING_GUIDE.md
 !TURKISH_TOKENIZER_README.md
 !PARAMETER_RECOMMENDATIONS.md
+!sft/README.md
 
 # IDEs
 .vscode/
 .qodo/
 .idea/
 .DS_Store
+.gemini/

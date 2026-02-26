@@ -3,6 +3,10 @@ Luna-LM Model Başarı Görselleştirmesi
 LinkedIn paylaşımı için profesyonel infografik
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import torch
 import json
 import matplotlib.pyplot as plt
@@ -10,6 +14,7 @@ import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 import numpy as np
 from datetime import datetime
+
 
 def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     """LinkedIn için profesyonel görsel oluştur"""
@@ -35,20 +40,17 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     n_layers = model_cfg['n_layers']
     n_heads = model_cfg['n_heads']
     
-    # Yaklaşık parametre sayısı
-    params = (vocab_size * emb_dim +  # Token embedding
-              model_cfg['context_length'] * emb_dim +  # Position embedding
-              n_layers * (4 * emb_dim * emb_dim + 4 * emb_dim +  # Attention
-                         8 * emb_dim * emb_dim + 2 * emb_dim) +  # FFN + LayerNorm
-              vocab_size * emb_dim)  # Output head
+    params = (vocab_size * emb_dim +
+              model_cfg['context_length'] * emb_dim +
+              n_layers * (4 * emb_dim * emb_dim + 4 * emb_dim +
+                         8 * emb_dim * emb_dim + 2 * emb_dim) +
+              vocab_size * emb_dim)
     
     # ========== GÖRSEL TASARIMI ==========
     
-    # Koyu tema
     plt.style.use('dark_background')
     fig = plt.figure(figsize=(12, 14))
     
-    # Gradient arka plan
     ax_bg = fig.add_axes([0, 0, 1, 1])
     gradient = np.linspace(0, 1, 256).reshape(1, -1)
     gradient = np.vstack((gradient, gradient))
@@ -58,13 +60,11 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     gs = GridSpec(4, 2, figure=fig, height_ratios=[1.2, 1, 1.2, 0.8], 
                   hspace=0.4, wspace=0.3, left=0.08, right=0.92, top=0.92, bottom=0.06)
     
-    # ========== BAŞLIK ==========
     fig.text(0.5, 0.96, "Luna-LM", fontsize=36, fontweight='bold', 
              ha='center', color='#4FC3F7', fontfamily='sans-serif')
     fig.text(0.5, 0.91, "Turkce Dil Modeli | GPT Mimarisi | Sifirdan Egitim",
              fontsize=14, ha='center', color='#B0BEC5', style='italic')
     
-    # ========== MODEL METRİKLERİ (Sol Üst) ==========
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_facecolor('#1a1a2e')
     
@@ -86,7 +86,6 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     ax1.axis('off')
     ax1.set_title("Egitim Metrikleri", fontsize=16, color='white', pad=10, fontweight='bold')
     
-    # ========== MODEL MİMARİSİ (Sağ Üst) ==========
     ax2 = fig.add_subplot(gs[0, 1])
     ax2.set_facecolor('#1a1a2e')
     
@@ -108,11 +107,9 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     ax2.axis('off')
     ax2.set_title("Model Mimarisi", fontsize=16, color='white', pad=10, fontweight='bold')
     
-    # ========== LOSS GRAFİĞİ (Orta) ==========
     ax3 = fig.add_subplot(gs[1, :])
     ax3.set_facecolor('#0d1117')
     
-    # Simulated loss curve (gerçek loss verisi yoksa)
     epochs = np.arange(1, epoch + 1)
     train_losses = np.linspace(6.5, train_loss, len(epochs)) + np.random.normal(0, 0.1, len(epochs))
     val_losses = np.linspace(6.3, val_loss, len(epochs)) + np.random.normal(0, 0.08, len(epochs))
@@ -130,7 +127,6 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     ax3.set_title("Egitim Ilerlemesi", fontsize=16, color='white', pad=10, fontweight='bold')
     ax3.tick_params(colors='#B0BEC5')
     
-    # ========== ÖZELLİKLER (Alt Sol) ==========
     ax4 = fig.add_subplot(gs[2, 0])
     ax4.set_facecolor('#1a1a2e')
     
@@ -149,7 +145,6 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     ax4.axis('off')
     ax4.set_title("Ozellikler", fontsize=16, color='white', pad=10, fontweight='bold')
     
-    # ========== TEKNOLOJİLER (Alt Sağ) ==========
     ax5 = fig.add_subplot(gs[2, 1])
     ax5.set_facecolor('#1a1a2e')
     
@@ -169,7 +164,6 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     ax5.axis('off')
     ax5.set_title("Teknolojiler", fontsize=16, color='white', pad=10, fontweight='bold')
     
-    # ========== SAMPLE OUTPUT (En Alt) ==========
     ax6 = fig.add_subplot(gs[3, :])
     ax6.set_facecolor('#0d1117')
     
@@ -183,11 +177,9 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
     
     ax6.axis('off')
     
-    # ========== FOOTER ==========
     fig.text(0.5, 0.01, f"Luna-LM v1.0 | {datetime.now().strftime('%Y')} | github.com/iatagun/Luna-LM",
              fontsize=10, ha='center', color='#607D8B')
     
-    # Kaydet
     plt.savefig(output_file, dpi=150, bbox_inches='tight', 
                 facecolor='#0d1117', edgecolor='none')
     plt.close()
@@ -197,7 +189,8 @@ def create_linkedin_visual(checkpoint_dir, output_file="luna_lm_success.png"):
 
 
 if __name__ == "__main__":
-    checkpoint_dir = "luna_lm_checkpoints_20251218_121142"
+    project_root = os.path.join(os.path.dirname(__file__), '..')
+    checkpoint_dir = os.path.join(project_root, "luna_lm_checkpoints_20251218_121142")
     output_file = create_linkedin_visual(checkpoint_dir)
     print(f"\nGorsel hazir: {output_file}")
     print("LinkedIn'de paylasabilirsiniz!")

@@ -1,21 +1,24 @@
 """
 Luna-LM Foundation Model Eğitimi
-foundation_corpus.txt ile Türkçe dil modeli pretraining
+foundation_corpus_clean.txt ile Türkçe dil modeli pretraining
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import json
-import os
 from datetime import datetime
 import matplotlib.pyplot as plt
 
-# Türkçe tokenizer
-from turkish_tokenizer_pretrained import PretrainedTurkishTokenizer, create_dataloader_pretrained
-
-# Model ve yardımcı fonksiyonlar
-from model import GPTModel, MODEL_CONFIGS, get_model_config, generate_text
+# Luna paketi
+from luna.tokenizer import PretrainedTurkishTokenizer
+from luna.data import create_dataloader_pretrained
+from luna.model import GPTModel, MODEL_CONFIGS, get_model_config
+from luna.generate import generate_text
 
 
 # ==================== EĞİTİM FONKSİYONLARI ====================
@@ -71,53 +74,13 @@ def calc_loss_and_accuracy(data_loader, model, device, num_batches=None):
 
 
 def evaluate_model(model, train_loader, val_loader, device, eval_iter):
-    """Model değerlendirme - loss ve accuracy"""
+    """Model değerlendirme — loss ve accuracy"""
     model.eval()
     with torch.no_grad():
         train_loss, train_acc = calc_loss_and_accuracy(train_loader, model, device, num_batches=eval_iter)
         val_loss, val_acc = calc_loss_and_accuracy(val_loader, model, device, num_batches=eval_iter)
     model.train()
     return train_loss, train_acc, val_loss, val_acc
-
-
-def generate_text(model, tokenizer, device, start_text, max_new_tokens=50, temperature=1.0, top_k=50):
-    """Metin üretimi (temperature + top-k sampling)"""
-    model.eval()
-    
-    # Encode
-    encoded = tokenizer.encode(start_text)
-    encoded_tensor = torch.tensor(encoded).unsqueeze(0).to(device)
-    
-    # Generate
-    with torch.no_grad():
-        for _ in range(max_new_tokens):
-            # Context window limiti uygula
-            context_size = model.pos_emb.weight.shape[0]
-            idx_cond = encoded_tensor[:, -context_size:]
-            
-            # Predict
-            logits = model(idx_cond)
-            logits = logits[:, -1, :]
-            
-            # Temperature scaling
-            logits = logits / temperature
-            
-            # Top-k filtering
-            if top_k > 0:
-                top_k_values, top_k_indices = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < top_k_values[:, -1]] = -float('inf')
-            
-            # Sample
-            probs = torch.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-            
-            # Append
-            encoded_tensor = torch.cat((encoded_tensor, idx_next), dim=1)
-    
-    # Decode
-    output_ids = encoded_tensor.squeeze(0).tolist()
-    decoded = tokenizer.decode(output_ids)
-    return decoded
 
 
 def train_model(model, train_loader, val_loader, optimizer, device, 
@@ -150,7 +113,7 @@ def train_model(model, train_loader, val_loader, optimizer, device,
             loss = calc_loss_batch(input_batch, target_batch, model, device)
             loss.backward()
             
-            # Gradient clipping (opsiyonel)
+            # Gradient clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             
             optimizer.step()
@@ -163,7 +126,7 @@ def train_model(model, train_loader, val_loader, optimizer, device,
             
             # Evaluation
             if global_step % eval_freq == 0 and global_step > 0:
-                print()  # Yeni satır
+                print()
                 train_loss, train_acc, val_loss, val_acc = evaluate_model(
                     model, train_loader, val_loader, device, eval_iter
                 )
@@ -196,7 +159,7 @@ def train_model(model, train_loader, val_loader, optimizer, device,
                     print(f"\n  📝 Örnek metin üretimi:")
                     generated = generate_text(model, tokenizer, device, start_context, max_new_tokens=50)
                     print(f"  '{generated}'\n")
-                    model.train()  # Model'i train moduna geri döndür!
+                    model.train()
         
         # Epoch sonu
         avg_epoch_loss = epoch_loss / len(train_loader)
@@ -245,19 +208,18 @@ def main():
     # 1. Hyperparameters
     print("1. Hyperparameter konfigürasyonu...")
     
-    # Model boyutu seç
     MODEL_SIZE = "small"  # "tiny", "mini", "small", "medium"
     
     config = MODEL_CONFIGS[MODEL_SIZE]
 
     
     # Training hyperparameters (3.3GB corpus için optimize edildi)
-    BATCH_SIZE = 4          # Small model + 512 ctx için VRAM uyumlu
-    CONTEXT_LENGTH = 512    # Uzun context
-    NUM_EPOCHS = 5          # Büyük corpus = az epoch yeterli
-    LEARNING_RATE = 1e-4    # Büyük veri için düşük LR
-    EVAL_FREQ = 100         # Daha seyrek eval
-    EVAL_ITER = 10          # Daha representative loss
+    BATCH_SIZE = 4
+    CONTEXT_LENGTH = 512
+    NUM_EPOCHS = 5
+    LEARNING_RATE = 1e-4
+    EVAL_FREQ = 100
+    EVAL_ITER = 10
     
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -274,13 +236,17 @@ def main():
     vocab_size = tokenizer.vocab_size
     print(f"  ✓ Vocab size: {vocab_size:,}")
     
-    # 3. Data yükle (Memory-efficient: satır satır oku, sınırlı sayıda)
+    # 3. Data yükle (Memory-efficient)
     print("\n3. Corpus yükleniyor (memory-efficient mode)...")
     
-    MAX_LINES = 500000  # 500K satır limit (yaklaşık 500MB-1GB metin)
+    # Proje kök dizini
+    project_root = os.path.join(os.path.dirname(__file__), '..')
+    corpus_path = os.path.join(project_root, 'foundation_corpus_clean.txt')
+    
+    MAX_LINES = 500000
     
     lines = []
-    with open('foundation_corpus_clean.txt', 'r', encoding='utf-8') as f:
+    with open(corpus_path, 'r', encoding='utf-8') as f:
         for i, line in enumerate(f):
             if i >= MAX_LINES:
                 break
@@ -290,7 +256,7 @@ def main():
     
     print(f"  ✓ Yüklenen satır: {len(lines):,} (limit: {MAX_LINES:,})")
     
-    # Train/Val split (90/10) - RANDOM SPLIT
+    # Train/Val split (90/10) — RANDOM SPLIT
     import random
     random.seed(42)
     random.shuffle(lines)
@@ -302,7 +268,6 @@ def main():
     train_text = '\n'.join(train_lines)
     val_text = '\n'.join(val_lines)
     
-    # Bellek temizle
     del lines, train_lines, val_lines
     
     print(f"  ✓ Train: {len(train_text):,} karakter")
@@ -314,7 +279,7 @@ def main():
         train_text, tokenizer, 
         batch_size=BATCH_SIZE, 
         max_length=CONTEXT_LENGTH,
-        stride=CONTEXT_LENGTH,  # Full stride: tekrar yok
+        stride=CONTEXT_LENGTH,
         shuffle=True
     )
     
@@ -322,7 +287,7 @@ def main():
         val_text, tokenizer,
         batch_size=BATCH_SIZE,
         max_length=CONTEXT_LENGTH,
-        stride=CONTEXT_LENGTH,  # Full stride: tekrar yok
+        stride=CONTEXT_LENGTH,
         shuffle=False
     )
     
@@ -338,7 +303,7 @@ def main():
         "emb_dim": config["emb_dim"],
         "n_heads": config["n_heads"],
         "n_layers": config["n_layers"],
-        "drop_rate": 0.1,  # Büyük corpus = düşük dropout yeterli
+        "drop_rate": 0.1,
         "qkv_bias": False
     }
     
@@ -357,21 +322,20 @@ def main():
     
     # 6. Optimizer & Scheduler
     print("\n6. Optimizer ayarlanıyor...")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)  # Azaltıldı: daha iyi generalization
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
     
-    # Cosine annealing scheduler - LR'yi yumuşak şekilde düşürür
     num_training_steps = len(train_loader) * NUM_EPOCHS
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, 
         T_max=num_training_steps,
-        eta_min=LEARNING_RATE * 0.1  # Son LR, başlangıcın %10'u
+        eta_min=LEARNING_RATE * 0.1
     )
     print(f"  ✓ AdamW optimizer (lr={LEARNING_RATE})")
     print(f"  ✓ Cosine scheduler ({num_training_steps:,} steps)")
     
     # 7. Save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"luna_lm_checkpoints_{timestamp}"
+    save_dir = os.path.join(project_root, f"checkpoints/pretrain_{timestamp}")
     os.makedirs(save_dir, exist_ok=True)
     print(f"\n7. Checkpoint dizini: {save_dir}")
     
@@ -417,7 +381,7 @@ def main():
     plot_losses(train_losses, val_losses, tokens_seen, plot_path)
     
     # 10. Final test
-    print("\n10. Final test - Metin üretimi:")
+    print("\n10. Final test — Metin üretimi:")
     test_prompts = [
         "Bugün hava",
         "Yapay zekâ",
@@ -441,12 +405,6 @@ def main():
     print(f"\nToplam tokens işlendi: {tokens_seen[-1]:,}")
     print(f"Final train loss: {train_losses[-1]:.4f}")
     print(f"Final val loss: {val_losses[-1]:.4f}")
-    
-    print("\nSONRAKİ ADIMLAR:")
-    print("1. Loss grafiğini inceleyin")
-    print("2. Metin üretimi test edin")
-    print("3. Daha fazla epoch ile eğitin")
-    print("4. Fine-tuning için ch06 ve ch07'ye bakın")
 
 
 if __name__ == "__main__":
