@@ -55,7 +55,9 @@ class SFTDataset(Dataset):
     def __init__(self, data, tokenizer, max_length=512):
         self.encoded_texts = []
         
-        skipped = 0
+        too_long = 0
+        too_short = 0
+        
         for i, entry in enumerate(data):
             if (i + 1) % 10000 == 0:
                 print(f"    Tokenize: {i+1:,}/{len(data):,}...")
@@ -66,18 +68,24 @@ class SFTDataset(Dataset):
             
             tokens = tokenizer.encode(full_text)
             
-            # Max length'e truncate
-            if len(tokens) > max_length:
-                tokens = tokens[:max_length]
-            
             # Çok kısa örnekleri atla
             if len(tokens) < 10:
-                skipped += 1
+                too_short += 1
+                continue
+            
+            # Context length'i aşan örnekleri ATLA (truncate değil!)
+            # Truncate edersek cevaplar yarım kalır ve alignment bozulur
+            if len(tokens) > max_length:
+                too_long += 1
                 continue
             
             self.encoded_texts.append(tokens)
         
-        print(f"  ✓ SFTDataset: {len(self.encoded_texts):,} sample ({skipped} atlandı)")
+        total_skipped = too_long + too_short
+        print(f"  ✓ SFTDataset: {len(self.encoded_texts):,} sample kullanılacak")
+        print(f"    Atlanan (>{max_length} token): {too_long:,}")
+        print(f"    Atlanan (<10 token):          {too_short:,}")
+        print(f"    Toplam atlanan:               {total_skipped:,} / {len(data):,} ({100*total_skipped/max(len(data),1):.1f}%)")
     
     def __getitem__(self, index):
         return self.encoded_texts[index]
