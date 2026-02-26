@@ -163,15 +163,20 @@ MODEL_CONFIGS = {
         "n_heads": 4,
         "n_layers": 4,
     },
-    "small": {  # ~50M parameters — Önerilen başlangıç
+    "small": {  # ~25M parameters — 4GB VRAM
         "emb_dim": 512,
         "n_heads": 8,
         "n_layers": 6,
     },
-    "medium": {  # ~150M parameters — Daha iyi sonuçlar
+    "medium": {  # ~85M parameters — 8-12GB VRAM
         "emb_dim": 768,
         "n_heads": 12,
         "n_layers": 8,
+    },
+    "large": {  # ~350M parameters — 16-80GB VRAM (Cloud GPU)
+        "emb_dim": 1024,
+        "n_heads": 16,
+        "n_layers": 24,
     }
 }
 

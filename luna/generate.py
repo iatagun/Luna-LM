@@ -1,6 +1,6 @@
 """
 Luna-LM Metin Üretimi
-Temperature + Top-K + Top-P + Repetition Penalty
+Temperature + Top-K + Top-P + Repetition Penalty + EOS Stopping
 Projedeki TEK generate_text kaynağı.
 """
 
@@ -8,9 +8,10 @@ import torch
 
 
 def generate_text(model, tokenizer, device, start_text, max_new_tokens=100,
-                  temperature=0.7, top_k=50, top_p=0.9, repetition_penalty=1.2):
+                  temperature=0.7, top_k=50, top_p=0.9, repetition_penalty=1.2,
+                  eos_id=None):
     """
-    Metin üretimi (Temperature + Top-K + Top-P + Repetition Penalty)
+    Metin üretimi (Temperature + Top-K + Top-P + Repetition Penalty + EOS Stop)
     
     Args:
         model: GPTModel instance
@@ -22,8 +23,13 @@ def generate_text(model, tokenizer, device, start_text, max_new_tokens=100,
         top_k: Top-k sampling (0=disable)
         top_p: Top-p (nucleus) sampling (1.0=disable)
         repetition_penalty: Tekrar cezası (1.0=disable)
+        eos_id: EOS token ID — bu token üretildiğinde durur (None=disable)
     """
     model.eval()
+    
+    # Tokenizer'dan eos_id otomatik al (verilmemişse)
+    if eos_id is None and hasattr(tokenizer, 'eos_token_id'):
+        eos_id = tokenizer.eos_token_id
     
     encoded = tokenizer.encode(start_text)
     encoded_tensor = torch.tensor(encoded).unsqueeze(0).to(device)
@@ -75,6 +81,10 @@ def generate_text(model, tokenizer, device, start_text, max_new_tokens=100,
                 idx_next = torch.multinomial(probs, num_samples=1)
             else:
                 idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+            
+            # EOS stop: üretilen token EOS ise dur
+            if eos_id is not None and idx_next.item() == eos_id:
+                break
             
             encoded_tensor = torch.cat((encoded_tensor, idx_next), dim=1)
     

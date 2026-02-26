@@ -8,6 +8,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
+import glob
 
 from luna.utils import load_model
 from luna.generate import generate_text
@@ -34,7 +35,7 @@ def clean_sft_output(generated):
         answer = clean_gen
         
     # Stop token kontrolü
-    for stop_token in ["</assistant>", "<user>", "<system>"]:
+    for stop_token in ["</assistant>", "<user>", "<system>", "[SEP]"]:
         if stop_token in answer:
             answer = answer.split(stop_token)[0]
     
@@ -44,6 +45,33 @@ def clean_sft_output(generated):
         answer = answer[1:].strip()
         
     return answer
+
+
+def find_best_checkpoint(project_root):
+    """En iyi modeli bul: önce SFT, yoksa pretrained"""
+    
+    # 1. SFT checkpoint (en son)
+    sft_dirs = sorted(glob.glob(os.path.join(project_root, "checkpoints", "sft_*")))
+    if sft_dirs:
+        latest_sft = sft_dirs[-1]
+        best_model = os.path.join(latest_sft, "best_sft_model.pt")
+        if os.path.exists(best_model):
+            print(f"  ✓ SFT model bulundu: {latest_sft}")
+            return latest_sft, "sft"
+    
+    # 2. Pretrained checkpoint (yeni yapı)
+    pretrain_dirs = sorted(glob.glob(os.path.join(project_root, "checkpoints", "pretrain_*")))
+    if pretrain_dirs:
+        print(f"  ⚠ SFT model yok, pretrained kullanılacak")
+        return pretrain_dirs[-1], "pretrained"
+    
+    # 3. Eski yapı
+    old_dirs = sorted(glob.glob(os.path.join(project_root, "luna_lm_checkpoints_*")))
+    if old_dirs:
+        print(f"  ⚠ SFT model yok, eski pretrained kullanılacak")
+        return old_dirs[-1], "pretrained"
+    
+    return None, None
 
 
 def main():
@@ -58,29 +86,27 @@ def main():
     # Proje kök dizini
     project_root = os.path.join(os.path.dirname(__file__), '..')
     
-    # Model yükle — önce SFT modeline bak, yoksa checkpoint klasörüne
-    sft_path = os.path.join(project_root, "luna_sft_finetuned.pt")
-    pretrain_path = os.path.join(project_root, "luna_lm_checkpoints_20251218_121142")
+    # Model bul ve yükle
+    print("\n📦 Model aranıyor...")
+    checkpoint_path, model_type = find_best_checkpoint(project_root)
     
-    if os.path.exists(sft_path):
-        checkpoint_path = sft_path
-    elif os.path.exists(pretrain_path):
-        checkpoint_path = pretrain_path
-    else:
-        print("❌ Model bulunamadı!")
+    if checkpoint_path is None:
+        print("❌ Hiç model bulunamadı!")
+        print("   Önce eğitim yapın: python scripts/train.py")
         return
-        
-    print(f"\n📦 Model Yolu: {checkpoint_path}")
+    
+    print(f"  Model tipi: {model_type.upper()}")
+    print(f"  Yol: {checkpoint_path}")
     
     try:
         model, tokenizer, config = load_model(checkpoint_path, device)
     except Exception as e:
-        print(f"\n⚠️ Model yüklenirken hata oluştu: {e}")
+        print(f"\n⚠️ Model yüklenirken hata: {e}")
         return
     
-    # Test prompts (SFT için Soru Formatında)
+    # Test soruları
     print("\n" + "="*60)
-    print("SFT FORMATLI METİN ÜRETİMİ TESTİ")
+    print("SFT METİN ÜRETİMİ TESTİ")
     print("="*60)
     
     test_questions = [
@@ -88,36 +114,40 @@ def main():
         "Ampulü kim buldu?",
         "İstanbul'un önemi nedir?",
         "Mutluluk nedir?",
-        "Bana bir hikaye anlat.",
-        "Kravat nasıl bağlanır?",
+        "Yapay zeka ne işe yarar?",
+        "Türkiye'nin başkenti neresidir?",
     ]
     
     for q in test_questions:
-        print(f"\n❓ Soru: '{q}'")
-        print("-" * 40)
+        print(f"\n❓ {q}")
         
         full_prompt = format_sft_prompt(q)
         
         generated = generate_text(
             model, tokenizer, device,
             full_prompt, 
-            max_new_tokens=100, 
-            temperature=0.2,    
+            max_new_tokens=150, 
+            temperature=0.3,    
             top_k=40,
-            repetition_penalty=1.2 
+            repetition_penalty=1.2
         )
         
         answer = clean_sft_output(generated)
-        print(f"🤖 Luna: {answer}")
+        print(f"🤖 {answer}")
 
     # İnteraktif mod
     print("\n" + "="*60)
-    print("İNTERAKTİF SOHBET MODU (Çıkış için 'q')")
+    print("İNTERAKTİF SOHBET (Çıkış: q)")
     print("="*60)
     
     while True:
-        user_input = input("\nSiz: ").strip()
-        if user_input.lower() == 'q':
+        try:
+            user_input = input("\n❓ Siz: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nGörüşürüz! 👋")
+            break
+            
+        if user_input.lower() in ('q', 'quit', 'exit'):
             print("Görüşürüz! 👋")
             break
         
@@ -136,7 +166,7 @@ def main():
         )
         
         answer = clean_sft_output(generated)
-        print(f"Luna: {answer}")
+        print(f"🤖 Luna: {answer}")
 
 
 if __name__ == "__main__":

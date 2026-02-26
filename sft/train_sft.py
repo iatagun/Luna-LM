@@ -94,16 +94,16 @@ class SFTDataset(Dataset):
         return len(self.encoded_texts)
 
 
-def sft_collate_fn(batch, pad_token_id=0, ignore_index=-100,
+def sft_collate_fn(batch, pad_token_id=0, eos_token_id=102, ignore_index=-100,
                    allowed_max_length=None, device="cpu"):
     """
-    ch07 referansına uygun collate fonksiyonu.
+    ch07 referansına uygun collate fonksiyonu + EOS/PAD ayrımı.
     
-    1. Her örneğin sonuna EOS (pad_token_id) ekle
-    2. Batch'teki en uzun örneğe göre pad'le
+    1. Her örneğin sonuna EOS token (eos_token_id=[SEP]) ekle
+    2. Batch'teki en uzun örneğe göre PAD (pad_token_id=[PAD]) ile doldur
     3. input = padded[:-1], target = padded[1:]
-    4. Target'ta İLK pad token (EOS) tutuluyor → model cevabın bittiğini öğrenir
-    5. Geri kalan pad tokenlar -100 ile maskeleniyor → loss'a katılmaz
+    4. Target'ta EOS token tutuluyor → model cevabın bittiğini öğrenir
+    5. PAD tokenlar -100 ile maskeleniyor → loss'a katılmaz
     """
     batch_max_length = max(len(item) + 1 for item in batch)
     
@@ -111,17 +111,17 @@ def sft_collate_fn(batch, pad_token_id=0, ignore_index=-100,
     
     for item in batch:
         new_item = item.copy()
-        new_item += [pad_token_id]
+        # EOS token ekle — model bu token'ı üretmeyi öğrenecek
+        new_item += [eos_token_id]
+        # PAD ile doldur
         padded = new_item + [pad_token_id] * (batch_max_length - len(new_item))
         
         inputs = torch.tensor(padded[:-1])
         targets = torch.tensor(padded[1:])
         
-        # İLK pad (EOS) tut, GERİ KALANLARINI maskele
+        # PAD tokenlarını maskele (EOS token'ı maskeleme — öğrenilsin)
         mask = targets == pad_token_id
-        indices = torch.nonzero(mask).squeeze()
-        if indices.numel() > 1:
-            targets[indices[1:]] = ignore_index
+        targets[mask] = ignore_index
         
         if allowed_max_length is not None:
             inputs = inputs[:allowed_max_length]
@@ -195,9 +195,33 @@ def plot_losses(train_losses, val_losses, tokens_seen, save_path):
 
 # ==================== SFT EĞİTİM ====================
 
+def extract_answer(generated):
+    """Üretilen metinden temiz asistan cevabını çıkar"""
+    if "<assistant>" in generated:
+        answer = generated.split("<assistant>")[-1]
+        for stop in ["</assistant>", "<user>", "<system>", "[SEP]"]:
+            if stop in answer:
+                answer = answer.split(stop)[0]
+        answer = answer.strip()
+    else:
+        answer = generated.strip()
+    return answer
+
+
+# Eğitim sırasında gösterilecek test soruları
+SAMPLE_QUESTIONS = [
+    "Güneş hangi yönden doğar?",
+    "Yapay zeka nedir?",
+    "Türkiye'nin başkenti neresidir?",
+    "Neden gökyüzü mavidir?",
+    "Sağlıklı yaşam için ne önerirsin?",
+    "Kitap okumanın faydaları nelerdir?",
+]
+
+
 def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
               num_epochs, save_dir, tokenizer=None, eval_freq=5, eval_iter=5,
-              start_context=None):
+              sample_freq=500, start_context=None):
     """
     SFT eğitim loop'u — ch07 referansına uygun + Cosine LR Scheduler.
     """
@@ -265,6 +289,20 @@ def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
                     }, save_path)
                     print(f"  ✓ Best model! Val: {val_loss:.4f}")
                 
+                # Belirli aralıklarla örnek üretim (temiz Soru → Cevap)
+                if tokenizer is not None and global_step % sample_freq == 0 and global_step > 0:
+                    q = SAMPLE_QUESTIONS[global_step // sample_freq % len(SAMPLE_QUESTIONS)]
+                    sample_entry = {"user": q, "assistant": ""}
+                    prompt = format_input(sample_entry)
+                    generated = generate_text(
+                        model, tokenizer, device, prompt,
+                        max_new_tokens=100, temperature=0.3, top_k=40,
+                        repetition_penalty=1.2
+                    )
+                    answer = extract_answer(generated)
+                    print(f"  ❓ {q}")
+                    print(f"  🤖 {answer[:150]}")
+                
                 model.train()
         
         # Epoch sonu
@@ -273,7 +311,7 @@ def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
         print(f"Epoch {epoch+1}/{num_epochs} tamamlandı ({epoch_time/60:.1f} dk)")
         print(f"{'='*40}")
         
-        # Örnek üretim
+        # Epoch sonu — son örnek
         if tokenizer is not None and start_context is not None:
             model.eval()
             generated = generate_text(
@@ -281,15 +319,8 @@ def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
                 max_new_tokens=80, temperature=0.3, top_k=40,
                 repetition_penalty=1.2
             )
-            if "<assistant>" in generated:
-                answer = generated.split("<assistant>")[-1]
-                for stop in ["</assistant>", "<user>", "<system>"]:
-                    if stop in answer:
-                        answer = answer.split(stop)[0]
-                answer = answer.strip()
-            else:
-                answer = generated
-            print(f"  📝 Örnek: {answer}")
+            answer = extract_answer(generated)
+            print(f"  📝 Epoch sonu: {answer[:200]}")
             model.train()
         
         # Epoch checkpoint
@@ -387,12 +418,14 @@ def main():
     
     model, tokenizer, model_config = load_model(checkpoint_dir, device=device)
     
-    pad_token_id = tokenizer.tokenizer.sep_token_id or 0
+    pad_token_id = tokenizer.pad_token_id   # [PAD] = 0
+    eos_token_id = tokenizer.eos_token_id   # [SEP] = 102
     context_length = model_config.get("context_length", MAX_LENGTH)
     
     total_params = sum(p.numel() for p in model.parameters())
     print(f"  Model: {total_params/1e6:.1f}M parametre")
-    print(f"  Pad token ID: {pad_token_id}")
+    print(f"  PAD token ID: {pad_token_id}")
+    print(f"  EOS token ID: {eos_token_id}")
     print(f"  Context length: {context_length}")
     
     # ==========================================
@@ -453,6 +486,7 @@ def main():
     customized_collate_fn = partial(
         sft_collate_fn,
         pad_token_id=pad_token_id,
+        eos_token_id=eos_token_id,
         ignore_index=-100,
         allowed_max_length=context_length,
         device=device

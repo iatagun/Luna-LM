@@ -24,10 +24,20 @@ def load_model(checkpoint_path, device='cuda'):
     model_config = None
     tokenizer_name = 'dbmdz/bert-base-turkish-cased'  # Varsayılan
     
-    # Durum 1: checkpoint_path bir KLASÖR (Pretraining çıktısı)
+    # Durum 1: checkpoint_path bir KLASÖR (Pretraining veya SFT çıktısı)
     if os.path.isdir(checkpoint_path):
         config_path = os.path.join(checkpoint_path, "config.json")
-        weights_path = os.path.join(checkpoint_path, "best_model.pt")
+        
+        # SFT model'i öncelikli, yoksa pretrained
+        sft_weights = os.path.join(checkpoint_path, "best_sft_model.pt")
+        pretrain_weights = os.path.join(checkpoint_path, "best_model.pt")
+        
+        if os.path.exists(sft_weights):
+            weights_path = sft_weights
+        elif os.path.exists(pretrain_weights):
+            weights_path = pretrain_weights
+        else:
+            raise FileNotFoundError(f"Model dosyası bulunamadı: {checkpoint_path}")
         
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
