@@ -8,6 +8,7 @@ Referans: LLMs-from-scratch ch07 (Sebastian Raschka)
 
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from functools import partial
@@ -19,6 +20,7 @@ import random
 import time
 import matplotlib.pyplot as plt
 from datetime import datetime
+from torch.amp import autocast
 
 from luna.model import GPTModel
 from luna.tokenizer import PretrainedTurkishTokenizer
@@ -221,10 +223,12 @@ SAMPLE_QUESTIONS = [
 
 def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
               num_epochs, save_dir, tokenizer=None, eval_freq=5, eval_iter=5,
-              sample_freq=500, start_context=None):
+              sample_freq=500, start_context=None, use_bf16=False):
     """
     SFT eğitim loop'u — ch07 referansına uygun + Cosine LR Scheduler.
+    BF16 desteği eklendi.
     """
+    dtype = torch.bfloat16 if use_bf16 else torch.float32
     
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen = 0
@@ -250,7 +254,10 @@ def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
         
         for input_batch, target_batch in train_loader:
             optimizer.zero_grad()
-            loss = calc_loss_batch(input_batch, target_batch, model, device)
+            
+            with autocast('cuda', dtype=dtype, enabled=use_bf16):
+                loss = calc_loss_batch(input_batch, target_batch, model, device)
+            
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -271,9 +278,10 @@ def train_sft(model, train_loader, val_loader, optimizer, scheduler, device,
                 track_tokens_seen.append(tokens_seen)
                 
                 current_lr = optimizer.param_groups[0]['lr']
+                mem = torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
                 print(f"Ep {epoch+1} | Step {global_step:,} | "
                       f"Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
-                      f"LR: {current_lr:.2e} | Tokens: {tokens_seen:,}")
+                      f"LR: {current_lr:.2e} | Tokens: {tokens_seen:,} | VRAM: {mem:.1f}GB")
                 
                 # Best model
                 if val_loss < best_val_loss:
@@ -379,6 +387,14 @@ def load_sft_data(jsonl_path):
 # ==================== MAIN ====================
 
 def main():
+    parser = argparse.ArgumentParser(description="Luna-LM SFT (Supervised Fine-Tuning)")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=2, help="Number of epochs")
+    parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Specific checkpoint path")
+    parser.add_argument("--eval_freq", type=int, default=500, help="Evaluation frequency")
+    args = parser.parse_args()
+
     print("\n" + "="*60)
     print("LUNA-LM SFT EĞİTİMİ (83K+ Dataset)")
     print("="*60 + "\n")
@@ -386,13 +402,14 @@ def main():
     # ==========================================
     # Ayarlar — 83K dataset için optimize
     # ==========================================
-    BATCH_SIZE = 8          # VRAM'e göre: 4 (8GB), 8 (16GB), 16 (24GB+)
-    NUM_EPOCHS = 2          # 83K * 2 = 166K step yeterli
-    LEARNING_RATE = 5e-5    # ch07 referansı
-    WEIGHT_DECAY = 0.1      # ch07 referansı
-    EVAL_FREQ = 200         # 83K dataset → daha seyrek eval
-    EVAL_ITER = 10          # Loss tahmininde kullanılacak batch sayısı
-    MAX_LENGTH = 512        # Context length
+    BATCH_SIZE = args.batch_size
+    NUM_EPOCHS = args.epochs
+    LEARNING_RATE = args.lr
+    WEIGHT_DECAY = 0.1
+    EVAL_FREQ = args.eval_freq
+    EVAL_ITER = 10
+    MAX_LENGTH = 512
+    USE_BF16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -402,18 +419,33 @@ def main():
     # ==========================================
     # 1. Pretrained model yükle
     # ==========================================
-    print("\n1. Pretrained model yükleniyor...")
-    
     import glob
-    checkpoint_dirs = glob.glob(os.path.join(project_root, "checkpoints", "pretrain_*"))
-    if not checkpoint_dirs:
-        checkpoint_dirs = glob.glob(os.path.join(project_root, "luna_lm_checkpoints_*"))
+    project_root = os.path.join(os.path.dirname(__file__), '..')
     
-    if not checkpoint_dirs:
-        print("❌ Pretrained model bulunamadı! Önce scripts/train.py çalıştırın.")
+    checkpoint_dir = args.checkpoint
+    
+    if not checkpoint_dir:
+        # Checkpoint dizinlerini tara (Colab/Drive desteği dahil)
+        search_patterns = [
+            os.path.join(project_root, "checkpoints", "pretrain_*"),
+            os.path.join(project_root, "luna_lm_checkpoints_*"),
+            "/content/drive/MyDrive/LunaLM/pretrain_large_*",
+            "/content/drive/MyDrive/Luna-LM-Checkpoints/pretrain_*",
+        ]
+        
+        all_found = []
+        for pattern in search_patterns:
+            all_found.extend(glob.glob(pattern))
+        
+        if all_found:
+            # En son güncelleneni seç
+            checkpoint_dir = sorted(all_found)[-1]
+        
+    if not checkpoint_dir or not os.path.exists(checkpoint_dir):
+        print("❌ Pretrained model bulunamadı!")
+        print("Kullanım: python sft/train_sft.py --checkpoint /path/to/checkpoint")
         return
     
-    checkpoint_dir = sorted(checkpoint_dirs)[-1]
     print(f"  Checkpoint: {checkpoint_dir}")
     
     model, tokenizer, model_config = load_model(checkpoint_dir, device=device)
@@ -594,7 +626,9 @@ def main():
         tokenizer=tokenizer,
         eval_freq=EVAL_FREQ,
         eval_iter=EVAL_ITER,
+        sample_freq=500,
         start_context=start_context,
+        use_bf16=USE_BF16,
     )
     
     total_time = (time.time() - start_time) / 60
