@@ -198,16 +198,28 @@ def plot_losses(train_losses, val_losses, tokens_seen, save_path):
 # ==================== SFT EĞİTİM ====================
 
 def extract_answer(generated):
-    """Üretilen metinden temiz asistan cevabını çıkar"""
+    """Metinden sadece asistanın verdiği cevabı ayıkla"""
+    # Önce en spesifik etiketi dene
     if "<assistant>" in generated:
         answer = generated.split("<assistant>")[-1]
-        for stop in ["</assistant>", "<user>", "<system>", "[SEP]"]:
-            if stop in answer:
-                answer = answer.split(stop)[0]
-        answer = answer.strip()
+    # Alternatif etiketleri dene (bazen tokenizer boşluk ekleyebilir)
+    elif "< assistant >" in generated:
+        answer = generated.split("< assistant >")[-1]
     else:
-        answer = generated.strip()
-    return answer
+        # Eğer etiket bulunamazsa, son satırı veya en sondaki temiz metni almayı dene
+        # Bu SFT'nin çok başında olabilir
+        answer = generated.split("\n")[-1]
+    
+    # Kapanış etiketlerini ve diğer blokları temizle
+    for stop in ["</assistant>", "<user>", "<system>", "[SEP]", "</s>", "<|endoftext|>"]:
+        if stop in answer:
+            answer = answer.split(stop)[0]
+        # Boşluklu versiyonları da temizle
+        stop_spaced = f" {stop} "
+        if stop_spaced in answer:
+            answer = answer.split(stop_spaced)[0]
+            
+    return answer.strip()
 
 
 # Eğitim sırasında gösterilecek test soruları

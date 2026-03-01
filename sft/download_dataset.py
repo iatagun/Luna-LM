@@ -15,19 +15,18 @@ from datasets import load_dataset
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "sft_dataset.jsonl")
 
 
-def download_and_convert():
+def download_and_convert(limit=1000000):
     print("="*60)
-    print("ALPACA TURKISH COMBINED DATASET")
+    print("INSTRUCTURCA TURKISH DATASET")
     print("="*60)
-    print("\nKaynak: cenfis/alpaca-turkish-combined")
-    print("İndiriliyor...\n")
+    print("\nKaynak: turkish-nlp-suite/InstrucTurca")
+    print(f"Hedef: İlk {limit:,} satır\n")
     
     # HuggingFace'den indir
-    ds = load_dataset("cenfis/alpaca-turkish-combined")
+    ds = load_dataset("turkish-nlp-suite/InstrucTurca")
     
     train_data = ds["train"]
     print(f"✓ Dataset yüklendi: {len(train_data):,} satır")
-    print(f"  Sütunlar: {train_data.column_names}")
     
     # JSONL formatına dönüştür
     print(f"\nJSONL'e dönüştürülüyor: {OUTPUT_FILE}")
@@ -37,16 +36,46 @@ def download_and_convert():
     
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         for i, row in enumerate(train_data):
-            instruction = (row.get("instruction") or "").strip()
-            input_text = (row.get("input") or "").strip()
-            output_text = (row.get("output") or "").strip()
+            if valid >= limit:
+                break
             
-            # instruction ve output zorunlu
+            # Case-insensitive bir sözlük oluştur (anahtarları küçük harfe çevir)
+            row_lower = {k.lower(): v for k, v in row.items()}
+
+            if i == 0:
+                print(f"  🔍 Örnek Kolonlar: {list(row.keys())}")
+
+            # Esnek Kolon Eşleştirme (Küçük harf üzerinden)
+            instruction = ""
+            input_text = ""
+            output_text = ""
+
+            # Instruction / Prompt adayları
+            for key in ["instruction", "prompt", "question", "user", "input_text", "query", "input"]:
+                if row_lower.get(key):
+                    instruction = str(row_lower[key]).strip()
+                    break
+            
+            # Input / Context adayları (isteğe bağlı - ek bilgi varsa)
+            # Eğer 'input' hem ana soru hem ek bilgi olarak kullanılıyorsa çakışabilir
+            # InstrucTurca'da 'Input' ana soru gibi duruyor.
+            for key in ["context", "context_text"]:
+                if row_lower.get(key) and str(row_lower[key]).lower() != "none":
+                    input_text = str(row_lower[key]).strip()
+                    break
+
+            # Output / Response adayları
+            for key in ["output", "response", "assistant", "answer", "completion", "target"]:
+                if row_lower.get(key):
+                    output_text = str(row_lower[key]).strip()
+                    break
+
             if not instruction or not output_text:
                 skipped += 1
+                if skipped < 5:
+                    print(f"  ⚠️ Atlanan satır {i} - Mevcut: {list(row.keys())}")
                 continue
             
-            # user = instruction + input (varsa)
             user_text = instruction
             if input_text:
                 user_text += f"\n{input_text}"
@@ -59,8 +88,8 @@ def download_and_convert():
             f.write(json.dumps(entry, ensure_ascii=False) + '\n')
             valid += 1
             
-            if (i + 1) % 20000 == 0:
-                print(f"  İşlenen: {i+1:,}/{len(train_data):,}...")
+            if (i + 1) % 50000 == 0:
+                print(f"  İşlenen: {i+1:,}...")
     
     print(f"\n{'='*60}")
     print(f"TAMAMLANDI!")
@@ -70,8 +99,9 @@ def download_and_convert():
     print(f"  📄 Dosya: {OUTPUT_FILE}")
     
     # Dosya boyutu
-    size_mb = os.path.getsize(OUTPUT_FILE) / (1024 * 1024)
-    print(f"  💾 Boyut: {size_mb:.1f} MB")
+    if os.path.exists(OUTPUT_FILE):
+        size_gb = os.path.getsize(OUTPUT_FILE) / (1024**3)
+        print(f"  💾 Boyut: {size_gb:.2f} GB")
     
     # Örnek göster
     print(f"\n{'='*60}")
@@ -91,4 +121,4 @@ def download_and_convert():
 
 
 if __name__ == "__main__":
-    download_and_convert()
+    download_and_convert(limit=1000000)
