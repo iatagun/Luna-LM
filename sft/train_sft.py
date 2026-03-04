@@ -405,6 +405,7 @@ def main():
     parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
     parser.add_argument("--checkpoint", type=str, default=None, help="Specific checkpoint path")
     parser.add_argument("--eval_freq", type=int, default=500, help="Evaluation frequency")
+    parser.add_argument("--dataset_path", type=str, default=None, help="Path to SFT dataset (.jsonl)")
     args = parser.parse_args()
 
     print("\n" + "="*60)
@@ -479,15 +480,21 @@ def main():
     
     # Veri dosyasını bul
     sft_data_path = None
-    search_paths = [
-        os.path.join(project_root, "sft", "sft_dataset.jsonl"),
-        os.path.join(project_root, "sft_dataset_luna_text.jsonl"),
-        os.path.join(project_root, "sft_dataset.jsonl"),
-    ]
-    for p in search_paths:
-        if os.path.exists(p):
-            sft_data_path = p
-            break
+    
+    if args.dataset_path and os.path.exists(args.dataset_path):
+        sft_data_path = args.dataset_path
+    else:
+        search_paths = [
+            os.path.join(project_root, "sft", "sft_continued_dataset.jsonl"),
+            os.path.join(project_root, "sft", "sft_dataset.jsonl"),
+            os.path.join(project_root, "sft_continued_dataset.jsonl"),
+            os.path.join(project_root, "sft_dataset_luna_text.jsonl"),
+            os.path.join(project_root, "sft_dataset.jsonl"),
+        ]
+        for p in search_paths:
+            if os.path.exists(p):
+                sft_data_path = p
+                break
     
     if sft_data_path is None:
         print("❌ SFT dataset bulunamadı! Beklenen konumlar:")
